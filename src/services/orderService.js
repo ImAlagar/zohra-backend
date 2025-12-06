@@ -76,7 +76,6 @@ class OrderService {
     };
   }
 
-
   // Enhanced order totals calculation with quantity pricing
   async calculateOrderTotals(orderItems, couponCode = null) {
     let subtotal = 0;
@@ -208,8 +207,6 @@ class OrderService {
       hasQuantityDiscounts: quantitySavings > 0
     };
   }
-
-
 
   async initiateRazorpayPayment(orderData) {
     const {
@@ -366,13 +363,17 @@ class OrderService {
                 }
               }
             },
-            productVariant: {
+        productVariant: {
+          include: {
+            variantImages: {  // Add this
               select: {
-                id: true,
-                color: true,
-                size: true
+                imageUrl: true,
+                color: true
               }
             }
+          }
+        }
+
           }
         },
         customImages: true,
@@ -604,6 +605,7 @@ class OrderService {
   }
 
 
+
   async getAllOrders({ page, limit, status, userId, paymentStatus }) {
     const skip = (page - 1) * limit;
     
@@ -640,10 +642,14 @@ class OrderService {
                 }
               },
               productVariant: {
-                select: {
-                  id: true,
-                  color: true,
-                  size: true
+                include: {
+                  variantImages: {
+                    take: 1,
+                    select: {
+                      imageUrl: true,
+                      color: true
+                    }
+                  }
                 }
               }
             }
@@ -691,23 +697,32 @@ class OrderService {
             product: {
               include: {
                 images: {
-                  take: 1,
                   select: {
                     imageUrl: true
                   }
                 }
               }
             },
-            productVariant: {
-              select: {
-                id: true,
-                color: true,
-                size: true
+              productVariant: {
+                include: {
+                  variantImages: {
+                    take: 1,
+                    select: {
+                      imageUrl: true,
+                      color: true
+                    }
+                  }
+                }
               }
-            }
           }
         },
-        customImages: true, // Include custom images
+        customImages: {
+          select: {
+            imageUrl: true,
+            imageKey: true,
+            filename: true
+          }
+        },
         user: {
           select: {
             id: true,

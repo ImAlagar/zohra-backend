@@ -42,9 +42,7 @@ export const getSliderById = asyncHandler(async (req, res) => {
 });
 
 export const createSlider = asyncHandler(async (req, res) => {
-
-
-  // Extract data from req.body (already parsed by middleware)
+  // Extract data from req.body
   const sliderData = {
     title: req.body.title,
     subtitle: req.body.subtitle || null,
@@ -57,33 +55,32 @@ export const createSlider = asyncHandler(async (req, res) => {
     order: req.body.order ? parseInt(req.body.order) : 0,
     isActive: req.body.isActive !== undefined ? req.body.isActive : true,
     startDate: req.body.startDate || null,
-    endDate: req.body.endDate || null
+    endDate: req.body.endDate || null,
+    bgImage: null, // Initialize as null
+    bgImagePublicId: null,
+    image: null, // Initialize as null
+    imagePublicId: null
   };
 
-
-  // Validate that required files are provided
-  if (!req.files?.bgImage || !req.files?.image) {
-    return res.status(400).json({
-      success: false,
-      message: 'Both background image and main image are required'
-    });
-  }
-
   try {
-    // Upload images to S3
-    const uploadResult = await s3SliderService.uploadSliderImages(
-      req.files.bgImage[0],
-      req.files.image[0]
-    );
+    // Upload images to S3 if provided
+    if (req.files?.bgImage?.[0]) {
+      const bgImageResult = await s3SliderService.uploadSliderBgImage(
+        req.files.bgImage[0]
+      );
+      sliderData.bgImage = bgImageResult.url;
+      sliderData.bgImagePublicId = bgImageResult.key;
+    }
 
-    // Add S3 URLs to slider data
-    sliderData.bgImage = uploadResult.bgImage.url;
-    sliderData.bgImagePublicId = uploadResult.bgImage.key;
-    sliderData.image = uploadResult.mainImage.url;
-    sliderData.imagePublicId = uploadResult.mainImage.key;
+    if (req.files?.image?.[0]) {
+      const mainImageResult = await s3SliderService.uploadSliderMainImage(
+        req.files.image[0]
+      );
+      sliderData.image = mainImageResult.url;
+      sliderData.imagePublicId = mainImageResult.key;
+    }
 
-
-    // Create slider in database
+    // Create slider in database (images can be null)
     const slider = await sliderService.createSlider(sliderData);
     
     res.status(201).json({
@@ -114,8 +111,8 @@ export const updateSlider = asyncHandler(async (req, res) => {
   // Handle uploaded files
   if (req.files) {
     try {
-      // If new images are uploaded, upload to S3 and update URLs
-      if (req.files.bgImage && req.files.bgImage[0]) {
+      // Upload new background image if provided
+      if (req.files.bgImage?.[0]) {
         const bgImageResult = await s3SliderService.uploadSliderBgImage(
           req.files.bgImage[0],
           sliderId
@@ -123,14 +120,25 @@ export const updateSlider = asyncHandler(async (req, res) => {
         updateData.bgImage = bgImageResult.url;
         updateData.bgImagePublicId = bgImageResult.key;
       }
+      // If bgImage is empty string, set to null (remove image)
+      else if (req.body.bgImage === '') {
+        updateData.bgImage = null;
+        updateData.bgImagePublicId = null;
+      }
 
-      if (req.files.image && req.files.image[0]) {
+      // Upload new main image if provided
+      if (req.files.image?.[0]) {
         const mainImageResult = await s3SliderService.uploadSliderMainImage(
           req.files.image[0],
           sliderId
         );
         updateData.image = mainImageResult.url;
         updateData.imagePublicId = mainImageResult.key;
+      }
+      // If image is empty string, set to null (remove image)
+      else if (req.body.image === '') {
+        updateData.image = null;
+        updateData.imagePublicId = null;
       }
     } catch (uploadError) {
       console.error('S3 upload failed during update:', uploadError);

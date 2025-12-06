@@ -19,8 +19,8 @@ model HomeSlider {
   buttonText  String?
   buttonLink  String?
   layout      String   @default("left")
-  bgImage     String
-  image       String
+  bgImage     String?  // Made optional
+  image       String?  // Already optional
   imagePublicId String?
   bgImagePublicId String?
   isActive    Boolean  @default(true)

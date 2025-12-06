@@ -1111,13 +1111,8 @@ export const validateSliderImages = (req, res, next) => {
   next();
 };
 
-// Combined validation for slider creation with images
 export const validateCreateSlider = [
-  // First validate the form data
   ...validateSlider,
-  // Then validate the images
-  validateSliderImages,
-  // Final validation result check
   (req, res, next) => {
     const errors = validationResult(req);
     
@@ -1129,32 +1124,14 @@ export const validateCreateSlider = [
       });
     }
 
-    // Additional custom validation for required images
-    if (!req.files || !req.files.bgImage) {
-      return res.status(400).json({
-        success: false,
-        message: 'Background image is required'
-      });
-    }
-
-    if (!req.files || !req.files.image) {
-      return res.status(400).json({
-        success: false,
-        message: 'Main image is required'
-      });
-    }
-
+    // Images are now optional, no check required
     next();
   }
 ];
 
-// Combined validation for slider update with optional images
+// Simple validation for slider update with optional images
 export const validateUpdateSlider = [
-  // First validate the form data
   ...validateSliderUpdate,
-  // Then validate the images if provided
-  validateSliderImages,
-  // Final validation result check
   (req, res, next) => {
     const errors = validationResult(req);
     

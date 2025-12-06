@@ -503,94 +503,23 @@ class ProductService {
         });
     }
     
-async calculateCartPrices(cartItems) {
-    try {
-        // Ensure we have an array
-        const itemsArray = Array.isArray(cartItems) ? cartItems : [];
-        
-        const calculatedItems = await Promise.all(
-            itemsArray.map(async (item) => {
-                // Normalize the item
-                const normalizedItem = {
-                    productId: item?.productId || '',
-                    quantity: parseInt(item?.quantity) || 1,
-                    variantId: item?.variantId || null,
-                    originalItem: item // Keep original for reference
-                };
-
-                // Skip if no productId
-                if (!normalizedItem.productId) {
-                    return {
-                        ...normalizedItem,
-                        priceCalculation: {
-                            totalPrice: 0,
-                            effectiveUnitPrice: 0,
-                            savings: 0,
-                            hasQuantityPricing: false,
-                            error: 'Missing productId'
-                        },
-                        finalPrice: 0,
-                        error: 'Missing productId'
+    async calculateCartPrices(cartItems) {
+        try {
+            // Ensure we have an array
+            const itemsArray = Array.isArray(cartItems) ? cartItems : [];
+            
+            const calculatedItems = await Promise.all(
+                itemsArray.map(async (item) => {
+                    // Normalize the item
+                    const normalizedItem = {
+                        productId: item?.productId || '',
+                        quantity: parseInt(item?.quantity) || 1,
+                        variantId: item?.variantId || null,
+                        originalItem: item // Keep original for reference
                     };
-                }
 
-                try {
-                    const priceCalculation = await this.calculateQuantityPrice(
-                        normalizedItem.productId,
-                        normalizedItem.quantity
-                    );
-                    
-                    return {
-                        ...normalizedItem,
-                        priceCalculation,
-                        finalPrice: priceCalculation.totalPrice,
-                        success: true
-                    };
-                } catch (error) {
-                    logger.error(`Price calculation failed for ${normalizedItem.productId}:`, error);
-                    
-                    // Fallback to direct product lookup
-                    try {
-                        const product = await prisma.product.findFirst({
-                            where: {
-                                OR: [
-                                    { id: normalizedItem.productId },
-                                    { productCode: normalizedItem.productId }
-                                ],
-                                status: 'ACTIVE'
-                            },
-                            select: {
-                                id: true,
-                                name: true,
-                                normalPrice: true,
-                                offerPrice: true,
-                                productCode: true,
-                                status: true
-                            }
-                        });
-
-                        if (!product) {
-                            throw new Error(`Active product not found: ${normalizedItem.productId}`);
-                        }
-
-                        const unitPrice = product.offerPrice || product.normalPrice || 0;
-                        const totalPrice = unitPrice * normalizedItem.quantity;
-                        
-                        return {
-                            ...normalizedItem,
-                            productDetails: product,
-                            priceCalculation: {
-                                totalPrice,
-                                effectiveUnitPrice: unitPrice,
-                                savings: 0,
-                                hasQuantityPricing: false,
-                                error: `Fallback: ${error.message}`
-                            },
-                            finalPrice: totalPrice,
-                            success: false,
-                            warning: 'Used fallback pricing'
-                        };
-                    } catch (dbError) {
+                    // Skip if no productId
+                    if (!normalizedItem.productId) {
                         return {
                             ...normalizedItem,
                             priceCalculation: {
@@ -598,44 +527,116 @@ async calculateCartPrices(cartItems) {
                                 effectiveUnitPrice: 0,
                                 savings: 0,
                                 hasQuantityPricing: false,
-                                error: dbError.message
+                                error: 'Missing productId'
                             },
                             finalPrice: 0,
-                            success: false,
-                            error: dbError.message
+                            error: 'Missing productId'
                         };
                     }
-                }
-            })
-        );
 
-        // Calculate totals
-        const successfulItems = calculatedItems.filter(item => item.success);
-        const failedItems = calculatedItems.filter(item => !item.success);
-        
-        const subtotal = calculatedItems.reduce((sum, item) => sum + (item.finalPrice || 0), 0);
-        const totalSavings = calculatedItems.reduce((sum, item) => sum + (item.priceCalculation?.savings || 0), 0);
+                    try {
+                        const priceCalculation = await this.calculateQuantityPrice(
+                            normalizedItem.productId,
+                            normalizedItem.quantity
+                        );
+                        
+                        return {
+                            ...normalizedItem,
+                            priceCalculation,
+                            finalPrice: priceCalculation.totalPrice,
+                            success: true
+                        };
+                    } catch (error) {
+                        logger.error(`Price calculation failed for ${normalizedItem.productId}:`, error);
+                        
+                        // Fallback to direct product lookup
+                        try {
+                            const product = await prisma.product.findFirst({
+                                where: {
+                                    OR: [
+                                        { id: normalizedItem.productId },
+                                        { productCode: normalizedItem.productId }
+                                    ],
+                                    status: 'ACTIVE'
+                                },
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    normalPrice: true,
+                                    offerPrice: true,
+                                    productCode: true,
+                                    status: true
+                                }
+                            });
 
-        return {
-            items: calculatedItems,
-            successfulItems,
-            failedItems,
-            subtotal,
-            totalSavings,
-            total: subtotal,
-            hasQuantityDiscounts: totalSavings > 0,
-            success: failedItems.length === 0,
-            warnings: failedItems.length > 0 ? 
-                `${failedItems.length} items had pricing issues` : 
-                null
-        };
-        
-    } catch (error) {
-        logger.error('Critical error in calculateCartPrices:', error);
-        throw error;
+                            if (!product) {
+                                throw new Error(`Active product not found: ${normalizedItem.productId}`);
+                            }
+
+                            const unitPrice = product.offerPrice || product.normalPrice || 0;
+                            const totalPrice = unitPrice * normalizedItem.quantity;
+                            
+                            return {
+                                ...normalizedItem,
+                                productDetails: product,
+                                priceCalculation: {
+                                    totalPrice,
+                                    effectiveUnitPrice: unitPrice,
+                                    savings: 0,
+                                    hasQuantityPricing: false,
+                                    error: `Fallback: ${error.message}`
+                                },
+                                finalPrice: totalPrice,
+                                success: false,
+                                warning: 'Used fallback pricing'
+                            };
+                        } catch (dbError) {
+                            return {
+                                ...normalizedItem,
+                                priceCalculation: {
+                                    totalPrice: 0,
+                                    effectiveUnitPrice: 0,
+                                    savings: 0,
+                                    hasQuantityPricing: false,
+                                    error: dbError.message
+                                },
+                                finalPrice: 0,
+                                success: false,
+                                error: dbError.message
+                            };
+                        }
+                    }
+                })
+            );
+
+            // Calculate totals
+            const successfulItems = calculatedItems.filter(item => item.success);
+            const failedItems = calculatedItems.filter(item => !item.success);
+            
+            const subtotal = calculatedItems.reduce((sum, item) => sum + (item.finalPrice || 0), 0);
+            const totalSavings = calculatedItems.reduce((sum, item) => sum + (item.priceCalculation?.savings || 0), 0);
+
+            return {
+                items: calculatedItems,
+                successfulItems,
+                failedItems,
+                subtotal,
+                totalSavings,
+                total: subtotal,
+                hasQuantityDiscounts: totalSavings > 0,
+                success: failedItems.length === 0,
+                warnings: failedItems.length > 0 ? 
+                    `${failedItems.length} items had pricing issues` : 
+                    null
+            };
+            
+        } catch (error) {
+            logger.error('Critical error in calculateCartPrices:', error);
+            throw error;
+        }
     }
-}
-    
+        
+
     async createProduct(productData, variantImages = [], variantColors = []) {
         const {
             name,
@@ -2385,7 +2386,7 @@ async calculateCartPrices(cartItems) {
     }
 
     // Get new arrivals (UPDATED: Using the flag)
-        async getNewArrivals(limit = 8) {
+    async getNewArrivals(limit = 8) {
             const products = await prisma.product.findMany({
                 where: {
                     status: 'ACTIVE',
@@ -2445,7 +2446,9 @@ async calculateCartPrices(cartItems) {
             });
 
             return productsWithRatings;
-        }
+    }
+
+
     // Get featured products
     async getFeaturedProducts(limit = 8) {
         const products = await prisma.product.findMany({

@@ -93,6 +93,7 @@ class SliderService {
     return slider;
   }
 
+// Create slider
 async createSlider(sliderData) {
   const {
     title,
@@ -103,19 +104,47 @@ async createSlider(sliderData) {
     buttonText,
     buttonLink,
     layout,
-    bgImage, // This is now the S3 URL
-    image,   // This is now the S3 URL
-    imagePublicId, // This is the S3 key
-    bgImagePublicId, // This is the S3 key
+    bgImage, // OPTIONAL - can be null
+    image,   // OPTIONAL - can be null
+    imagePublicId, // OPTIONAL
+    bgImagePublicId, // OPTIONAL
     isActive,
     order,
     startDate,
     endDate
   } = sliderData;
 
-  // Validate required fields
-  if (!title || !bgImage || !image) {
-    throw new Error('Title, background image, and image are required');
+  // Validate required fields - only title is required now
+  if (!title) {
+    throw new Error('Title is required');
+  }
+
+  // Extract public IDs from URLs if provided but IDs are not
+  let finalImagePublicId = imagePublicId;
+  let finalBgImagePublicId = bgImagePublicId;
+
+  if (image && !imagePublicId) {
+    try {
+      // Extract filename/ID from URL
+      const url = new URL(image);
+      const pathParts = url.pathname.split('/');
+      finalImagePublicId = pathParts[pathParts.length - 1];
+    } catch (error) {
+      // If URL parsing fails, use the last part after slashes
+      const parts = image.split('/');
+      finalImagePublicId = parts[parts.length - 1];
+    }
+  }
+
+  if (bgImage && !bgImagePublicId) {
+    try {
+      const url = new URL(bgImage);
+      const pathParts = url.pathname.split('/');
+      finalBgImagePublicId = pathParts[pathParts.length - 1];
+    } catch (error) {
+      const parts = bgImage.split('/');
+      finalBgImagePublicId = parts[parts.length - 1];
+    }
   }
 
   const slider = await prisma.homeSlider.create({
@@ -128,14 +157,16 @@ async createSlider(sliderData) {
       buttonText: buttonText || null,
       buttonLink: buttonLink || null,
       layout: layout || 'left',
-      bgImage, // S3 URL
-      image,   // S3 URL
-      imagePublicId: imagePublicId || null, // S3 key
-      bgImagePublicId: bgImagePublicId || null, // S3 key
+      bgImage: bgImage || null,  // Can be null
+      image: image || null,      // Can be null
+      imagePublicId: finalImagePublicId || null,
+      bgImagePublicId: finalBgImagePublicId || null,
       isActive: isActive !== undefined ? isActive : true,
       order: order || 0,
       startDate: startDate ? new Date(startDate) : null,
-      endDate: endDate ? new Date(endDate) : null
+      endDate: endDate ? new Date(endDate) : null,
+      createdAt: new Date(),
+      updatedAt: new Date()
     }
   });
 
@@ -143,31 +174,124 @@ async createSlider(sliderData) {
   return slider;
 }
 
-  // Update slider
-  async updateSlider(sliderId, updateData) {
-    const slider = await prisma.homeSlider.findUnique({
-      where: { id: sliderId }
-    });
-    
-    if (!slider) {
-      throw new Error('Slider not found');
-    }
-
-    const updatedSlider = await prisma.homeSlider.update({
-      where: { id: sliderId },
-      data: {
-        ...updateData,
-        // Convert date strings to Date objects if provided
-        ...(updateData.startDate && { startDate: new Date(updateData.startDate) }),
-        ...(updateData.endDate && { endDate: new Date(updateData.endDate) }),
-        updatedAt: new Date()
-      }
-    });
-
-    logger.info(`Slider updated: ${sliderId}`);
-    return updatedSlider;
+// Update slider
+async updateSlider(sliderId, updateData) {
+  // Check if slider exists
+  const slider = await prisma.homeSlider.findUnique({
+    where: { id: sliderId }
+  });
+  
+  if (!slider) {
+    throw new Error('Slider not found');
   }
 
+  const {
+    title,
+    subtitle,
+    description,
+    smallText,
+    offerText,
+    buttonText,
+    buttonLink,
+    layout,
+    bgImage,
+    image,
+    imagePublicId,
+    bgImagePublicId,
+    isActive,
+    order,
+    startDate,
+    endDate,
+    ...otherData
+  } = updateData;
+
+  // Prepare update data
+  const dataToUpdate = {};
+
+  // Handle title
+  if (title !== undefined) {
+    if (!title.trim()) {
+      throw new Error('Title cannot be empty');
+    }
+    dataToUpdate.title = title;
+  }
+
+  // Handle text fields - can set to null
+  if (subtitle !== undefined) dataToUpdate.subtitle = subtitle || null;
+  if (description !== undefined) dataToUpdate.description = description || null;
+  if (smallText !== undefined) dataToUpdate.smallText = smallText || null;
+  if (offerText !== undefined) dataToUpdate.offerText = offerText || null;
+  if (buttonText !== undefined) dataToUpdate.buttonText = buttonText || null;
+  if (buttonLink !== undefined) dataToUpdate.buttonLink = buttonLink || null;
+  
+  // Handle layout
+  if (layout !== undefined) dataToUpdate.layout = layout || 'left';
+  
+  // Handle boolean fields
+  if (isActive !== undefined) dataToUpdate.isActive = isActive;
+  
+  // Handle numeric fields
+  if (order !== undefined) dataToUpdate.order = order || 0;
+  
+  // Handle dates
+  if (startDate !== undefined) dataToUpdate.startDate = startDate ? new Date(startDate) : null;
+  if (endDate !== undefined) dataToUpdate.endDate = endDate ? new Date(endDate) : null;
+
+  // Handle background image - can set to null
+  if (bgImage !== undefined) {
+    dataToUpdate.bgImage = bgImage || null;
+    
+    // Handle bgImagePublicId
+    if (bgImagePublicId !== undefined) {
+      dataToUpdate.bgImagePublicId = bgImagePublicId || null;
+    } else if (bgImage) {
+      // Extract public ID from URL if not provided
+      try {
+        const url = new URL(bgImage);
+        const pathParts = url.pathname.split('/');
+        dataToUpdate.bgImagePublicId = pathParts[pathParts.length - 1];
+      } catch (error) {
+        const parts = bgImage.split('/');
+        dataToUpdate.bgImagePublicId = parts[parts.length - 1];
+      }
+    } else {
+      dataToUpdate.bgImagePublicId = null;
+    }
+  }
+
+  // Handle main image - can set to null
+  if (image !== undefined) {
+    dataToUpdate.image = image || null;
+    
+    // Handle imagePublicId
+    if (imagePublicId !== undefined) {
+      dataToUpdate.imagePublicId = imagePublicId || null;
+    } else if (image) {
+      // Extract public ID from URL if not provided
+      try {
+        const url = new URL(image);
+        const pathParts = url.pathname.split('/');
+        dataToUpdate.imagePublicId = pathParts[pathParts.length - 1];
+      } catch (error) {
+        const parts = image.split('/');
+        dataToUpdate.imagePublicId = parts[parts.length - 1];
+      }
+    } else {
+      dataToUpdate.imagePublicId = null;
+    }
+  }
+
+  // Add updatedAt timestamp
+  dataToUpdate.updatedAt = new Date();
+
+  const updatedSlider = await prisma.homeSlider.update({
+    where: { id: sliderId },
+    data: dataToUpdate
+  });
+
+  logger.info(`Slider updated: ${sliderId}`);
+  return updatedSlider;
+}
   // Delete slider
   async deleteSlider(sliderId) {
     const slider = await prisma.homeSlider.findUnique({
