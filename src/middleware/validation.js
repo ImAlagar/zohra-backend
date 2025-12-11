@@ -191,6 +191,7 @@ export const validateOrder = [
 ];
 
 
+
 export const validateProduct = [
   // Check if required fields exist
   body('name')
@@ -213,66 +214,148 @@ export const validateProduct = [
     .isFloat({ min: 0 })
     .withMessage('Normal price must be a valid number greater than or equal to 0'),
 
-
-body('categoryId')
+  body('offerPrice')
     .optional({ nullable: true })
-    .isLength({ min: 1, max: 50 }) // CUIDs are typically 25 characters
+    .isFloat({ min: 0 })
+    .withMessage('Offer price must be a valid number greater than or equal to 0'),
+
+  body('wholesalePrice')
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage('Wholesale price must be a valid number greater than or equal to 0'),
+
+  body('hasColors')
+    .optional()
+    .isBoolean()
+    .withMessage('hasColors must be a boolean')
+    .toBoolean(),
+
+  body('categoryId')
+    .optional({ nullable: true })
+    .isLength({ min: 1, max: 50 })
     .withMessage('Category ID must be a valid ID'),
 
-body('subcategoryId')
+  body('subcategoryId')
     .optional({ nullable: true })
     .custom((value, { req }) => {
-        if (value && !req.body.categoryId) {
-            throw new Error('Category must be selected when choosing a subcategory');
-        }
-        return true;
+      if (value && !req.body.categoryId) {
+        throw new Error('Category must be selected when choosing a subcategory');
+      }
+      return true;
     })
     .isLength({ min: 1, max: 50 })
     .withMessage('Subcategory ID must be a valid ID'),  
 
   body('variants')
+    .notEmpty()
+    .withMessage('Variants field is required')
     .custom((value, { req }) => {
-      if (!value) {
-        throw new Error('Variants field is required');
-      }
+      let variants;
       
-      // Value should already be parsed from FormData
-      if (!Array.isArray(value)) {
+      // Parse variants if it's a string
+      if (typeof value === 'string') {
+        try {
+          variants = JSON.parse(value);
+        } catch (error) {
+          throw new Error('Invalid JSON format in variants field');
+        }
+      } else {
+        variants = value;
+      }
+
+      if (!Array.isArray(variants)) {
         throw new Error('Variants must be an array');
       }
 
-      if (value.length === 0) {
+      if (variants.length === 0) {
         throw new Error('At least one variant is required');
       }
 
-      // Validate each variant
-      value.forEach((variant, index) => {
-        if (!variant.color || typeof variant.color !== 'string' || variant.color.trim() === '') {
-          throw new Error(`Variant ${index}: Color is required and must be a non-empty string`);
-        }
+      // Check if product has colors or not
+      const hasColors = req.body.hasColors === 'true' || req.body.hasColors === true;
 
-        if (!Array.isArray(variant.sizes)) {
-          throw new Error(`Variant ${index}: Sizes must be an array`);
-        }
-
-        if (variant.sizes.length === 0) {
-          throw new Error(`Variant ${index}: At least one size is required`);
-        }
-
-        // Validate each size
-        variant.sizes.forEach((sizeObj, sizeIndex) => {
-          if (!sizeObj.size || typeof sizeObj.size !== 'string' || sizeObj.size.trim() === '') {
-            throw new Error(`Variant ${index}, Size ${sizeIndex}: Size value is required`);
+      if (hasColors) {
+        // ========== VALIDATION FOR PRODUCTS WITH COLORS ==========
+        variants.forEach((variant, index) => {
+          // Color is required for products with colors
+          if (!variant.color || typeof variant.color !== 'string' || variant.color.trim() === '') {
+            throw new Error(`Variant ${index + 1}: Color is required for products with colors`);
           }
 
-          if (sizeObj.stock !== undefined && sizeObj.stock !== null) {
-            const stock = parseInt(sizeObj.stock);
-            if (isNaN(stock) || stock < 0) {
-              throw new Error(`Variant ${index}, Size ${sizeIndex}: Stock must be a non-negative integer`);
+          // Validate color name
+          if (variant.color.length < 2 || variant.color.length > 50) {
+            throw new Error(`Variant ${index + 1}: Color name must be between 2 and 50 characters`);
+          }
+
+          // Validate sizes array
+          if (!Array.isArray(variant.sizes)) {
+            throw new Error(`Variant ${index + 1}: Sizes must be an array`);
+          }
+
+          if (variant.sizes.length === 0) {
+            throw new Error(`Variant ${index + 1}: At least one size is required`);
+          }
+
+          // Validate each size
+          variant.sizes.forEach((sizeObj, sizeIndex) => {
+            if (!sizeObj.size || typeof sizeObj.size !== 'string' || sizeObj.size.trim() === '') {
+              throw new Error(`Variant "${variant.color}", Size ${sizeIndex + 1}: Size value is required`);
             }
+
+            if (sizeObj.size.length < 1 || sizeObj.size.length > 20) {
+              throw new Error(`Variant "${variant.color}", Size ${sizeIndex + 1}: Size must be between 1 and 20 characters`);
+            }
+
+            // Stock validation
+            const stock = sizeObj.stock;
+            if (stock === undefined || stock === null) {
+              throw new Error(`Variant "${variant.color}", Size "${sizeObj.size}": Stock is required`);
+            }
+
+            const stockNum = parseInt(stock);
+            if (isNaN(stockNum) || stockNum < 0) {
+              throw new Error(`Variant "${variant.color}", Size "${sizeObj.size}": Stock must be a non-negative integer`);
+            }
+          });
+        });
+      } else {
+        // ========== VALIDATION FOR PRODUCTS WITHOUT COLORS ==========
+        variants.forEach((sizeObj, index) => {
+          // For simple products, variants should be size objects directly
+          
+          // Validate size
+          if (!sizeObj.size || typeof sizeObj.size !== 'string' || sizeObj.size.trim() === '') {
+            throw new Error(`Size ${index + 1}: Size value is required`);
+          }
+
+          if (sizeObj.size.length < 1 || sizeObj.size.length > 20) {
+            throw new Error(`Size ${index + 1}: Size must be between 1 and 20 characters`);
+          }
+
+          // Validate stock
+          const stock = sizeObj.stock;
+          if (stock === undefined || stock === null) {
+            throw new Error(`Size "${sizeObj.size}": Stock is required`);
+          }
+
+          const stockNum = parseInt(stock);
+          if (isNaN(stockNum) || stockNum < 0) {
+            throw new Error(`Size "${sizeObj.size}": Stock must be a non-negative integer`);
+          }
+
+          // SKU is optional for simple products
+          if (sizeObj.sku && (typeof sizeObj.sku !== 'string' || sizeObj.sku.length > 100)) {
+            throw new Error(`Size "${sizeObj.size}": SKU must be a string and less than 100 characters`);
           }
         });
-      });
+
+        // Check for duplicate sizes
+        const sizes = variants.map(v => v.size.trim().toUpperCase());
+        const uniqueSizes = [...new Set(sizes)];
+        if (sizes.length !== uniqueSizes.length) {
+          throw new Error('Duplicate sizes are not allowed');
+        }
+      }
 
       return true;
     }),
@@ -282,19 +365,71 @@ body('subcategoryId')
     .custom((value) => {
       if (!value) return true;
       
-      if (!Array.isArray(value)) {
+      let productDetails = value;
+      
+      // Parse if string
+      if (typeof value === 'string') {
+        try {
+          productDetails = JSON.parse(value);
+        } catch (error) {
+          throw new Error('Invalid JSON format in productDetails field');
+        }
+      }
+
+      if (!Array.isArray(productDetails)) {
         throw new Error('Product details must be an array');
       }
 
-      value.forEach((detail, index) => {
+      productDetails.forEach((detail, index) => {
         if (!detail.title || typeof detail.title !== 'string' || detail.title.trim() === '') {
-          throw new Error(`Product detail ${index}: Title is required`);
+          throw new Error(`Product detail ${index + 1}: Title is required`);
+        }
+
+        if (detail.title.length < 2 || detail.title.length > 100) {
+          throw new Error(`Product detail ${index + 1}: Title must be between 2 and 100 characters`);
         }
 
         if (!detail.description || typeof detail.description !== 'string' || detail.description.trim() === '') {
-          throw new Error(`Product detail ${index}: Description is required`);
+          throw new Error(`Product detail ${index + 1}: Description is required`);
+        }
+
+        if (detail.description.length < 2 || detail.description.length > 500) {
+          throw new Error(`Product detail ${index + 1}: Description must be between 2 and 500 characters`);
         }
       });
+
+      return true;
+    }),
+
+  // Validate files based on product type
+  body()
+    .custom((value, { req }) => {
+      const hasColors = req.body.hasColors === 'true' || req.body.hasColors === true;
+      const files = req.files || [];
+      const variantColors = req.body.variantColors || [];
+
+      if (hasColors) {
+        // For products with colors, check if we have variantImages
+        const variantImages = files.filter(file => file.fieldname === 'variantImages');
+        
+        if (variantImages.length === 0) {
+          throw new Error('At least one variant image is required for products with colors');
+        }
+
+        // If variantColors array is provided, it should match the number of images
+        if (variantColors && Array.isArray(variantColors) && variantColors.length > 0) {
+          if (variantColors.length !== variantImages.length) {
+            throw new Error('Number of variant colors must match number of variant images');
+          }
+        }
+      } else {
+        // For products without colors, check if we have images
+        const variantImages = files.filter(file => file.fieldname === 'variantImages');
+        
+        if (variantImages.length === 0) {
+          throw new Error('At least one product image is required');
+        }
+      }
 
       return true;
     }),
@@ -304,19 +439,19 @@ body('subcategoryId')
     const errors = validationResult(req);
     
     if (!errors.isEmpty()) {
-
-      
       return res.status(400).json({
         success: false,
         message: 'Product validation failed',
-        errors: errors.array()
+        errors: errors.array().map(err => ({
+          field: err.path || err.param,
+          message: err.msg
+        }))
       });
     }
 
     next();
   }
 ];
-
 
 // Product update validation (similar but with optional fields)
 export const validateProductUpdate = [
@@ -340,38 +475,175 @@ export const validateProductUpdate = [
     .withMessage('Normal price must be a valid number greater than or equal to 0'),
 
   body('offerPrice')
-    .optional()
+    .optional({ nullable: true })
     .isFloat({ min: 0 })
     .withMessage('Offer price must be a valid number greater than or equal to 0'),
 
   body('wholesalePrice')
-    .optional()
+    .optional({ nullable: true })
     .isFloat({ min: 0 })
     .withMessage('Wholesale price must be a valid number greater than or equal to 0'),
 
-  body('description')
+  body('hasColors')
     .optional()
-    .isLength({ max: 2000 })
-    .withMessage('Description must be less than 2000 characters'),
+    .isBoolean()
+    .withMessage('hasColors must be a boolean')
+    .toBoolean(),
+
+  body('categoryId')
+    .optional({ nullable: true })
+    .isLength({ min: 1, max: 50 })
+    .withMessage('Category ID must be a valid ID'),
+
+  body('subcategoryId')
+    .optional({ nullable: true })
+    .custom((value, { req }) => {
+      if (value && !req.body.categoryId) {
+        throw new Error('Category must be selected when choosing a subcategory');
+      }
+      return true;
+    })
+    .isLength({ min: 1, max: 50 })
+    .withMessage('Subcategory ID must be a valid ID'),
 
   body('variants')
     .optional()
-    .custom((value) => {
-      // Similar validation as create but optional
-      let variants = value;
+    .custom((value, { req }) => {
+      if (!value) return true;
+      
+      let variants;
+      
+      // Parse variants if it's a string
       if (typeof value === 'string') {
         try {
           variants = JSON.parse(value);
         } catch (error) {
           throw new Error('Invalid JSON format in variants field');
         }
+      } else {
+        variants = value;
       }
 
       if (!Array.isArray(variants)) {
         throw new Error('Variants must be an array');
       }
 
-      // Rest of variant validation similar to create...
+      if (variants.length === 0) {
+        throw new Error('At least one variant is required');
+      }
+
+      // Check if product has colors or not
+      const hasColors = req.body.hasColors === 'true' || req.body.hasColors === true || req.body.hasColors === undefined;
+
+      if (hasColors) {
+        // Validation for products with colors
+        variants.forEach((variant, index) => {
+          if (!variant.color || typeof variant.color !== 'string' || variant.color.trim() === '') {
+            throw new Error(`Variant ${index + 1}: Color is required for products with colors`);
+          }
+
+          if (!Array.isArray(variant.sizes)) {
+            throw new Error(`Variant ${index + 1}: Sizes must be an array`);
+          }
+
+          if (variant.sizes.length === 0) {
+            throw new Error(`Variant ${index + 1}: At least one size is required`);
+          }
+
+          variant.sizes.forEach((sizeObj, sizeIndex) => {
+            if (!sizeObj.size || typeof sizeObj.size !== 'string' || sizeObj.size.trim() === '') {
+              throw new Error(`Variant "${variant.color}", Size ${sizeIndex + 1}: Size value is required`);
+            }
+
+            if (sizeObj.stock !== undefined && sizeObj.stock !== null) {
+              const stockNum = parseInt(sizeObj.stock);
+              if (isNaN(stockNum) || stockNum < 0) {
+                throw new Error(`Variant "${variant.color}", Size "${sizeObj.size}": Stock must be a non-negative integer`);
+              }
+            }
+          });
+        });
+      } else {
+        // Validation for products without colors
+        variants.forEach((sizeObj, index) => {
+          if (!sizeObj.size || typeof sizeObj.size !== 'string' || sizeObj.size.trim() === '') {
+            throw new Error(`Size ${index + 1}: Size value is required`);
+          }
+
+          if (sizeObj.stock !== undefined && sizeObj.stock !== null) {
+            const stockNum = parseInt(sizeObj.stock);
+            if (isNaN(stockNum) || stockNum < 0) {
+              throw new Error(`Size "${sizeObj.size}": Stock must be a non-negative integer`);
+            }
+          }
+        });
+
+        // Check for duplicate sizes
+        const sizes = variants.map(v => v.size.trim().toUpperCase());
+        const uniqueSizes = [...new Set(sizes)];
+        if (sizes.length !== uniqueSizes.length) {
+          throw new Error('Duplicate sizes are not allowed');
+        }
+      }
+
+      return true;
+    }),
+
+  body('productDetails')
+    .optional()
+    .custom((value) => {
+      if (!value) return true;
+      
+      let productDetails = value;
+      
+      if (typeof value === 'string') {
+        try {
+          productDetails = JSON.parse(value);
+        } catch (error) {
+          throw new Error('Invalid JSON format in productDetails field');
+        }
+      }
+
+      if (!Array.isArray(productDetails)) {
+        throw new Error('Product details must be an array');
+      }
+
+      productDetails.forEach((detail, index) => {
+        if (!detail.title || typeof detail.title !== 'string' || detail.title.trim() === '') {
+          throw new Error(`Product detail ${index + 1}: Title is required`);
+        }
+
+        if (!detail.description || typeof detail.description !== 'string' || detail.description.trim() === '') {
+          throw new Error(`Product detail ${index + 1}: Description is required`);
+        }
+      });
+
+      return true;
+    }),
+
+  // Validate files for update
+  body()
+    .custom((value, { req }) => {
+      const hasColors = req.body.hasColors === 'true' || req.body.hasColors === true || req.body.hasColors === undefined;
+      const files = req.files || [];
+      const variantColors = req.body.variantColors || [];
+
+      // For update, files are optional (can keep existing images)
+      // Only validate if new files are being uploaded
+      if (files.length > 0) {
+        if (hasColors) {
+          const variantImages = files.filter(file => file.fieldname === 'variantImages');
+          
+          // If variantColors array is provided, it should match the number of images
+          if (variantColors && Array.isArray(variantColors) && variantColors.length > 0) {
+            if (variantColors.length !== variantImages.length) {
+              throw new Error('Number of variant colors must match number of variant images');
+            }
+          }
+        }
+        // For products without colors, any uploaded files are fine
+      }
+
       return true;
     }),
 
@@ -381,7 +653,10 @@ export const validateProductUpdate = [
       return res.status(400).json({
         success: false,
         message: 'Product update validation failed',
-        errors: errors.array()
+        errors: errors.array().map(err => ({
+          field: err.path || err.param,
+          message: err.msg
+        }))
       });
     }
     next();

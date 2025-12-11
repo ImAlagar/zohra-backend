@@ -645,10 +645,11 @@ class ProductService {
             normalPrice,
             offerPrice,
             wholesalePrice,
-            categoryId, // This might be undefined/null
+            categoryId,
             subcategoryId,
             productDetails = [],
-            variants = []
+            variants = [],
+            hasColors = true // NEW: Flag to indicate if product has colors
         } = productData;
 
         // Check if product code already exists
@@ -660,7 +661,7 @@ class ProductService {
             throw new Error('Product code already exists');
         }
         
-        // ONLY check category if categoryId is provided
+        // Category validation (keep existing)
         if (categoryId) {
             const category = await prisma.category.findUnique({
                 where: { id: categoryId }
@@ -670,7 +671,6 @@ class ProductService {
                 throw new Error('Category not found');
             }
             
-            // Check if subcategory exists and belongs to category
             if (subcategoryId) {
                 const subcategory = await prisma.subcategory.findUnique({
                     where: { id: subcategoryId }
@@ -685,7 +685,6 @@ class ProductService {
                 }
             }
         } else {
-            // If category is not provided, subcategory should also not be provided
             if (subcategoryId) {
                 throw new Error('Subcategory cannot be selected without a category');
             }
@@ -697,52 +696,151 @@ class ProductService {
             description: detail.description
         }));
 
-        // Group images by color
-        const variantImagesByColor = this.groupVariantImagesByColor(variantImages, variants, variantColors);
+        // Parse variants if it's a string
+        let parsedVariants = variants;
+        if (typeof variants === 'string') {
+            try {
+                parsedVariants = JSON.parse(variants);
+            } catch (error) {
+                throw new Error('Invalid JSON format in variants field');
+            }
+        }
 
-        // Create individual variants for EACH color-size combination
+        if (!Array.isArray(parsedVariants)) {
+            throw new Error('Variants must be an array');
+        }
+
+        if (parsedVariants.length === 0) {
+            throw new Error('At least one variant is required');
+        }
+
         const flattenedVariants = [];
 
-        for (const variantGroup of variants) {
-            const { color, sizes = [] } = variantGroup;
-
-            // Get images for this color
-            const colorImages = variantImagesByColor[color] || [];
-
-            let variantImagesData = [];
+        if (hasColors) {
+            // ========== PRODUCTS WITH COLORS ==========
             
-            // Upload variant images if provided for this color
-            if (colorImages.length > 0) {
+            // Validate each variant has color
+            parsedVariants.forEach((variant, index) => {
+                if (!variant.color || typeof variant.color !== 'string' || variant.color.trim() === '') {
+                    throw new Error(`Variant ${index}: Color is required for products with colors`);
+                }
+            });
+
+            // Group images by color
+            const variantImagesByColor = this.groupVariantImagesByColor(variantImages, parsedVariants, variantColors);
+
+            for (const variantGroup of parsedVariants) {
+                const { color, sizes = [] } = variantGroup;
+
+                // Get images for this color
+                const colorImages = variantImagesByColor[color] || [];
+
+                let variantImagesData = [];
+                
+                // Upload variant images if provided
+                if (colorImages.length > 0) {
+                    try {
+                        const uploadResults = await s3UploadService.uploadMultipleImages(
+                            colorImages,
+                            `products/${productCode}/variants/${color}`
+                        );
+                        
+                        variantImagesData = uploadResults.map((result, index) => ({
+                            imageUrl: result.url,
+                            imagePublicId: result.key,
+                            isPrimary: index === 0,
+                            color: color
+                        }));
+                        
+                    } catch (uploadError) {
+                        logger.error('Failed to upload variant images:', uploadError);
+                        throw new Error('Failed to upload variant images');
+                    }
+                }
+
+                // Create variant for each size
+                for (const sizeObj of sizes) {
+                    const { size, stock = 0, sku: sizeSku } = sizeObj;
+
+                    if (!size || size.trim() === '') {
+                        continue;
+                    }
+
+                    let sku = sizeSku;
+                    if (!sku) {
+                        if (categoryId) {
+                            const category = await prisma.category.findUnique({
+                                where: { id: categoryId },
+                                select: { name: true }
+                            });
+                            const categoryCode = category ? category.name.substring(0, 3).toUpperCase() : 'GEN';
+                            sku = `${productCode}-${categoryCode}-${color}-${size}`;
+                        } else {
+                            sku = `${productCode}-${color}-${size}`;
+                        }
+                    }
+
+                    // Check SKU uniqueness
+                    if (sku) {
+                        const existingVariant = await prisma.productVariant.findUnique({
+                            where: { sku }
+                        });
+                        
+                        if (existingVariant) {
+                            throw new Error(`SKU already exists: ${sku}`);
+                        }
+                    }
+
+                    flattenedVariants.push({
+                        color, // With color
+                        size: size.trim(),
+                        stock: parseInt(stock) || 0,
+                        sku,
+                        variantImages: {
+                            create: variantImagesData
+                        }
+                    });
+                }
+            }
+        } else {
+            // ========== PRODUCTS WITHOUT COLORS (SIMPLE) ==========
+            
+            // For simple products, we expect variants in format: [{size: "M", stock: 10}, ...]
+            // No color field needed
+            
+            // Upload all images as general product images
+            let generalImagesData = [];
+            if (variantImages.length > 0) {
                 try {
                     const uploadResults = await s3UploadService.uploadMultipleImages(
-                        colorImages,
-                        `products/${productCode}/variants/${color}`
+                        variantImages,
+                        `products/${productCode}/general`
                     );
                     
-                    variantImagesData = uploadResults.map((result, index) => ({
+                    generalImagesData = uploadResults.map((result, index) => ({
                         imageUrl: result.url,
                         imagePublicId: result.key,
                         isPrimary: index === 0,
-                        color: color
+                        color: null // No color for simple products
                     }));
                     
                 } catch (uploadError) {
-                    logger.error('Failed to upload variant images:', uploadError);
-                    throw new Error('Failed to upload variant images');
+                    logger.error('Failed to upload product images:', uploadError);
+                    throw new Error('Failed to upload product images');
                 }
+            } else {
+                throw new Error('At least one product image is required');
             }
 
-            // Create individual variant for EACH size
-            for (const sizeObj of sizes) {
-                const { size, stock = 0, sku: sizeSku } = sizeObj;
+            // Create variants without colors
+            for (const sizeObj of parsedVariants) {
+                const { size, stock = 0 } = sizeObj;
 
-                // Validate size is provided
                 if (!size || size.trim() === '') {
                     continue;
                 }
 
-                // Create SKU with category code or generic code
-                let sku = sizeSku;
+                let sku = sizeObj.sku;
                 if (!sku) {
                     if (categoryId) {
                         const category = await prisma.category.findUnique({
@@ -750,13 +848,13 @@ class ProductService {
                             select: { name: true }
                         });
                         const categoryCode = category ? category.name.substring(0, 3).toUpperCase() : 'GEN';
-                        sku = `${productCode}-${categoryCode}-${color}-${size}`;
+                        sku = `${productCode}-${categoryCode}-${size}`;
                     } else {
-                        sku = `${productCode}-GEN-${color}-${size}`;
+                        sku = `${productCode}-${size}`;
                     }
                 }
 
-                // Check if SKU already exists
+                // Check SKU uniqueness
                 if (sku) {
                     const existingVariant = await prisma.productVariant.findUnique({
                         where: { sku }
@@ -767,58 +865,48 @@ class ProductService {
                     }
                 }
 
-                // Create individual variant with BOTH color and size
+                // For simple products, create variant with color as null
                 flattenedVariants.push({
-                    color,
+                    color: null, // NULL for no colors
                     size: size.trim(),
                     stock: parseInt(stock) || 0,
                     sku,
                     variantImages: {
-                        create: variantImagesData
+                        create: generalImagesData // Use same images for all sizes
                     }
                 });
             }
+
+            if (flattenedVariants.length === 0) {
+                throw new Error('No valid sizes provided');
+            }
         }
 
-        // Validate we have variants
         if (flattenedVariants.length === 0) {
             throw new Error('No valid variants with sizes');
         }
 
-        // Create product data object conditionally
-        const productDataToCreate = {
-            name,
-            productCode,
-            description,
-            normalPrice: parseFloat(normalPrice),
-            offerPrice: offerPrice ? parseFloat(offerPrice) : null,
-            wholesalePrice: wholesalePrice ? parseFloat(wholesalePrice) : null,
-            categoryId: categoryId || null, // Set to null if not provided
-            subcategoryId: subcategoryId || null,
-            productDetails: {
-                create: productDetailsData
-            },
-            variants: {
-                create: flattenedVariants
-            }
-        };
-
-        // Create product with all variants
+        // Create product
         const product = await prisma.product.create({
-            data: productDataToCreate,
+            data: {
+                name,
+                productCode,
+                description,
+                normalPrice: parseFloat(normalPrice),
+                offerPrice: offerPrice ? parseFloat(offerPrice) : null,
+                wholesalePrice: wholesalePrice ? parseFloat(wholesalePrice) : null,
+                categoryId: categoryId || null,
+                subcategoryId: subcategoryId || null,
+                productDetails: {
+                    create: productDetailsData
+                },
+                variants: {
+                    create: flattenedVariants
+                }
+            },
             include: {
-                category: {
-                    select: {
-                        id: true,
-                        name: true
-                    }
-                },
-                subcategory: {
-                    select: {
-                        id: true,
-                        name: true
-                    }
-                },
+                category: true,
+                subcategory: true,
                 productDetails: true,
                 variants: {
                     include: {
@@ -832,8 +920,21 @@ class ProductService {
         return product;
     }
 
+    // Update groupVariantImagesByColor to handle simple products
     groupVariantImagesByColor(variantImages, variants, variantColors) {
         const imagesByColor = {};
+
+        // If hasColors is false, assign all images to "GENERAL" color
+        if (!variants[0]?.color) {
+            // This is a simple product without colors
+            if (!imagesByColor.GENERAL) {
+                imagesByColor.GENERAL = [];
+            }
+            variantImages.forEach((image) => {
+                imagesByColor.GENERAL.push(image);
+            });
+            return imagesByColor;
+        }
 
         // Get unique colors from variants
         const uniqueColors = [...new Set(variants.map(v => v.color))];
@@ -919,11 +1020,22 @@ class ProductService {
             subcategoryId,
             productDetails,
             status,
-            variants
+            variants,
+            hasColors = false // Default to false (without colors)
         } = updateData;
         
-        // ✅ FIX: Ensure variants is always an array
-        const variantsData = Array.isArray(variants) ? variants : [];
+        // Parse variants if it's a string
+        let parsedVariants = variants;
+        if (variants && typeof variants === 'string') {
+            try {
+                parsedVariants = JSON.parse(variants);
+            } catch (error) {
+                throw new Error('Invalid JSON format in variants field');
+            }
+        }
+        
+        // Ensure variants is always an array
+        const variantsData = Array.isArray(parsedVariants) ? parsedVariants : [];
         
         // Existing category/subcategory validation...
         if (categoryId && categoryId !== product.categoryId) {
@@ -947,7 +1059,7 @@ class ProductService {
             }
         }
         
-        // ✅ FIX: Group images using variantColors
+        // Group images using variantColors
         let variantImagesByColor = {};
         if (variantsData.length > 0 && files.length > 0) {
             variantImagesByColor = this.groupVariantImagesByColor(files, variantsData, variantColors);
@@ -982,20 +1094,20 @@ class ProductService {
             };
         }
         
-        // ✅ FIX: Handle variants update ONLY if variants data is provided
+        // Handle variants update ONLY if variants data is provided
         if (variantsData.length > 0) {
             
             // Get existing variant images grouped by color for preservation
             const existingImagesByColor = {};
             product.variants.forEach(variant => {
-                if (!existingImagesByColor[variant.color]) {
-                    existingImagesByColor[variant.color] = [];
+                const colorKey = variant.color || 'GENERAL'; // Use 'GENERAL' for null colors
+                if (!existingImagesByColor[colorKey]) {
+                    existingImagesByColor[colorKey] = [];
                 }
                 if (variant.variantImages && variant.variantImages.length > 0) {
-                    existingImagesByColor[variant.color].push(...variant.variantImages);
+                    existingImagesByColor[colorKey].push(...variant.variantImages);
                 }
             });
-            
             
             // Delete existing variants and their images
             await prisma.productVariantImage.deleteMany({
@@ -1012,59 +1124,148 @@ class ProductService {
             
             const flattenedVariants = [];
             
-            for (const variantGroup of variantsData) {
-                const { color, sizes = [] } = variantGroup;
-                const colorImages = variantImagesByColor[color] || [];
-                const existingColorImages = existingImagesByColor[color] || [];
+            if (hasColors) {
+                // ========== UPDATE PRODUCT WITH COLORS ==========
                 
+                for (const variantGroup of variantsData) {
+                    const { color, sizes = [] } = variantGroup;
+                    
+                    if (!color) {
+                        throw new Error('Color is required for products with colors');
+                    }
+                    
+                    const colorImages = variantImagesByColor[color] || [];
+                    const existingColorImages = existingImagesByColor[color] || [];
+                    
+                    let variantImagesData = [];
+                    
+                    // Preserve existing images if no new images uploaded
+                    if (colorImages.length > 0) {
+                        // Upload new variant images if provided
+                        try {
+                            const uploadResults = await s3UploadService.uploadMultipleImages(
+                                colorImages,
+                                `products/${product.productCode}/variants/${color}`
+                            );
+                            
+                            variantImagesData = uploadResults.map((result, index) => ({
+                                imageUrl: result.url,
+                                imagePublicId: result.key,
+                                isPrimary: index === 0,
+                                color: color
+                            }));
+                            
+                        } catch (uploadError) {
+                            logger.error('Failed to upload variant images during update:', uploadError);
+                            throw new Error('Failed to upload variant images');
+                        }
+                    } else if (existingColorImages.length > 0) {
+                        // Preserve existing images when no new images are uploaded
+                        variantImagesData = existingColorImages.map((image, index) => ({
+                            imageUrl: image.imageUrl,
+                            imagePublicId: image.imagePublicId,
+                            isPrimary: image.isPrimary,
+                            color: color
+                        }));
+                    }
+                    
+                    // Create individual variants for each size
+                    for (const sizeObj of sizes) {
+                        const { size, stock = 0, sku: sizeSku } = sizeObj;
+                        
+                        if (!size || size.trim() === '') {
+                            console.warn(`Skipping invalid size for "${color}": ${size}`);
+                            continue;
+                        }
+                        
+                        const sku = sizeSku || `${product.productCode}-${color}-${size}`;
+                        
+                        // Check SKU uniqueness (excluding current product's variants)
+                        if (sku) {
+                            const existingVariant = await prisma.productVariant.findFirst({
+                                where: { 
+                                    sku,
+                                    productId: { not: productId }
+                                }
+                            });
+                            
+                            if (existingVariant) {
+                                throw new Error(`SKU already exists: ${sku}`);
+                            }
+                        }
+                        
+                        flattenedVariants.push({
+                            color,
+                            size: size.trim(),
+                            stock: parseInt(stock) || 0,
+                            sku,
+                            variantImages: {
+                                create: variantImagesData
+                            }
+                        });
+                        
+                    }
+                }
+            } else {
+                // ========== UPDATE PRODUCT WITHOUT COLORS ==========
                 
-                let variantImagesData = [];
+                // Upload all images as general product images if new files are uploaded
+                let generalImagesData = [];
                 
-                // ✅ FIX: Preserve existing images if no new images uploaded
-                if (colorImages.length > 0) {
-                    // Upload new variant images if provided
+                if (files.length > 0) {
                     try {
                         const uploadResults = await s3UploadService.uploadMultipleImages(
-                            colorImages,
-                            `products/${product.productCode}/variants/${color}`
+                            files,
+                            `products/${product.productCode}/general`
                         );
                         
-                        variantImagesData = uploadResults.map((result, index) => ({
+                        generalImagesData = uploadResults.map((result, index) => ({
                             imageUrl: result.url,
                             imagePublicId: result.key,
                             isPrimary: index === 0,
-                            color: color
+                            color: null
                         }));
                         
-                        
                     } catch (uploadError) {
-                        logger.error('Failed to upload variant images during update:', uploadError);
-                        throw new Error('Failed to upload variant images');
+                        logger.error('Failed to upload product images during update:', uploadError);
+                        throw new Error('Failed to upload product images');
                     }
-                } else if (existingColorImages.length > 0) {
-                    // ✅ FIX: Preserve existing images when no new images are uploaded
-                    
-                    variantImagesData = existingColorImages.map((image, index) => ({
-                        imageUrl: image.imageUrl,
-                        imagePublicId: image.imagePublicId,
-                        isPrimary: image.isPrimary,
-                        color: color
-                    }));
-                    
                 } else {
-                    console.error(`⚠️ No images found for color "${color}"`);
+                    // Preserve existing images
+                    const existingGeneralImages = existingImagesByColor['GENERAL'] || existingImagesByColor[null] || [];
+                    if (existingGeneralImages.length > 0) {
+                        generalImagesData = existingGeneralImages.map((image, index) => ({
+                            imageUrl: image.imageUrl,
+                            imagePublicId: image.imagePublicId,
+                            isPrimary: image.isPrimary,
+                            color: null
+                        }));
+                    }
                 }
                 
-                // Create individual variants for each size
-                for (const sizeObj of sizes) {
-                    const { size, stock = 0, sku: sizeSku } = sizeObj;
+                // Create variants without colors
+                for (const sizeObj of variantsData) {
+                    const { size, stock = 0 } = sizeObj;
                     
                     if (!size || size.trim() === '') {
-                        console.warn(`Skipping invalid size for "${color}": ${size}`);
+                        console.warn(`Skipping invalid size: ${size}`);
                         continue;
                     }
                     
-                    const sku = sizeSku || `${product.productCode}-${color}-${size}`;
+                    let sku = sizeObj.sku;
+                    if (!sku) {
+                        if (categoryId || product.categoryId) {
+                            const catId = categoryId || product.categoryId;
+                            const category = await prisma.category.findUnique({
+                                where: { id: catId },
+                                select: { name: true }
+                            });
+                            const categoryCode = category ? category.name.substring(0, 3).toUpperCase() : 'GEN';
+                            sku = `${product.productCode}-${categoryCode}-${size}`;
+                        } else {
+                            sku = `${product.productCode}-${size}`;
+                        }
+                    }
                     
                     // Check SKU uniqueness (excluding current product's variants)
                     if (sku) {
@@ -1080,26 +1281,28 @@ class ProductService {
                         }
                     }
                     
+                    // Create variant with null color for simple products
                     flattenedVariants.push({
-                        color,
+                        color: null,
                         size: size.trim(),
                         stock: parseInt(stock) || 0,
                         sku,
                         variantImages: {
-                            create: variantImagesData
+                            create: generalImagesData
                         }
                     });
-                    
                 }
             }
             
             // Add variants to update payload
-            updatePayload.variants = {
-                create: flattenedVariants
-            };
+            if (flattenedVariants.length > 0) {
+                updatePayload.variants = {
+                    create: flattenedVariants
+                };
+            }
             
         } else {
-            console.error('No variants data provided, keeping existing variants');
+            console.log('No variants data provided, keeping existing variants');
         }
         
         const updatedProduct = await prisma.product.update({
@@ -1134,7 +1337,7 @@ class ProductService {
         logger.info(`Product updated: ${productId}`);
         return updatedProduct;
     }
-    
+
     // Delete product - UPDATED: Remove product image deletion
     async deleteProduct(productId) {
         const product = await prisma.product.findUnique({

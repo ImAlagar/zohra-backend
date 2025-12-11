@@ -147,7 +147,7 @@ class RatingService {
         rating: parseInt(rating),
         title: title || null,
         review: review || null,
-        isApproved: false // Default to false for admin approval
+        isApproved: true // Default to false for admin approval
       },
       include: {
         product: {

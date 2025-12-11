@@ -20,7 +20,7 @@ router.post('/validate', validateCoupon);
 router.get('/available', getAvailableCoupons);
 
 // Admin routes
-router.get('/', auth, authorize('ADMIN'), getCoupons);
+router.get('/', getCoupons);
 router.get('/stats', auth, authorize('ADMIN'), getCouponStats); // Add stats route
 router.get('/:id', auth, authorize('ADMIN'), getCoupon);
 router.post('/', auth, authorize('ADMIN'), createCoupon);
