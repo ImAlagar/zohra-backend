@@ -16,7 +16,7 @@ export const config = {
   AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
   AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
   AWS_REGION: process.env.AWS_REGION || 'ap-south-1',
-  S3_BUCKET_NAME: process.env.S3_BUCKET_NAME || 'velan-ecom-images',
+  S3_BUCKET_NAME: process.env.S3_BUCKET_NAME || 'zohranightwear',
   
   // Email
   SMTP_HOST: process.env.SMTP_HOST,

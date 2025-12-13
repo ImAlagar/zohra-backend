@@ -45,7 +45,7 @@ const logger = winston.createLogger({
   level: LOG_LEVEL || 'info',
   levels,
   format: NODE_ENV === 'production' ? format : devFormat,
-  defaultMeta: { service: 'velan-ecommerce' },
+  defaultMeta: { service: 'zohranightwear' },
   transports: [
     // Write all logs with importance level of 'error' or less to 'error.log'
     new winston.transports.DailyRotateFile({
