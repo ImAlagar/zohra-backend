@@ -17,7 +17,7 @@ class s3UploadService {
   /**
    * Generic image upload method
    */
-  async uploadImage(buffer, folderName = 'Garments', fileName = null, contentType = 'image/jpeg') {
+  async uploadImage(buffer, folderName = 'zohra', fileName = null, contentType = 'image/jpeg') {
     try {
       // If fileName is provided, use it as the full key
       // If not, generate key with folderName and random filename
