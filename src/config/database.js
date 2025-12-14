@@ -1,9 +1,5 @@
-// config/database.js
 import { PrismaClient } from '@prisma/client';
 import logger from '../utils/logger.js';
-
-// Import the customization service
-import CustomizationService from '../services/customizationService.js';
 
 // Initialize Prisma Client with better error handling
 let prisma;
@@ -16,17 +12,8 @@ try {
   
   // Test connection on startup
   prisma.$connect()
-    .then(async () => {
-      logger.info('✅ Database connected successfully');
-      
-      // Initialize all existing products to have customizations
-      try {
-        await CustomizationService.ensureAllProductsHaveCustomization();
-        await CustomizationService.activateAllCustomizations();
-        logger.info('✅ All products initialized with customizations');
-      } catch (error) {
-        logger.error('Error initializing product customizations:', error);
-      }
+    .then(() => {
+      logger.info('✅ Database connected successfully');  
     })
     .catch((error) => {
       logger.error('❌ Database connection failed:', {

@@ -1520,13 +1520,18 @@ class ProductService {
         
         const { color, size, stock, sku } = variantData;
         
+        // Determine the values to be used for update
+        const updatedColor = color !== undefined ? color : variant.color;
+        const updatedSize = size !== undefined ? size : variant.size;
+        
         // Check if variant with same color and size already exists (excluding current variant)
-        if (color && size && (color !== variant.color || size !== variant.size)) {
+        // Only check if EITHER color OR size is being changed
+        if (updatedColor !== variant.color || updatedSize !== variant.size) {
             const existingVariant = await prisma.productVariant.findFirst({
                 where: {
                     productId,
-                    color,
-                    size,
+                    color: updatedColor,
+                    size: updatedSize,
                     id: { not: variantId }
                 }
             });
@@ -1556,13 +1561,13 @@ class ProductService {
             try {
                 const uploadResults = await s3UploadService.uploadMultipleImages(
                     files,
-                    `products/${productId}/variants/${color || variant.color}`
+                    `products/${productId}/variants/${updatedColor}`
                 );
                 newVariantImages = uploadResults.map(result => ({
                     imageUrl: result.url,
                     imagePublicId: result.key,
                     isPrimary: false,
-                    color: color || variant.color
+                    color: updatedColor
                 }));
             } catch (uploadError) {
                 logger.error('Failed to upload variant images:', uploadError);
@@ -1573,8 +1578,8 @@ class ProductService {
         const updatedVariant = await prisma.productVariant.update({
             where: { id: variantId },
             data: {
-                color: color || variant.color,
-                size: size || variant.size,
+                color: updatedColor,
+                size: updatedSize,
                 stock: stock !== undefined ? parseInt(stock) : variant.stock,
                 sku: sku || variant.sku,
                 updatedAt: new Date(),

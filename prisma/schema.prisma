@@ -106,18 +106,24 @@ model Category {
 }
 
 model Subcategory {
-  id            String    @id @default(cuid())
-  name          String
-  description   String?
-  image         String?
-  imagePublicId String?
-  isActive      Boolean   @default(true)
-  categoryId    String 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  category      Category  @relation(fields: [categoryId], references: [id])
-  products      Product[]
-  quantityPrices SubcategoryQuantityPrice[] // ADD THIS LINE
+  id             String    @id @default(cuid())
+  name           String
+  description    String?
+  image          String?
+  imagePublicId  String?
+  isActive       Boolean   @default(true)
+
+  // 🔹 OPTIONAL FK
+  categoryId     String?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // 🔹 OPTIONAL relation
+  category       Category? @relation(fields: [categoryId], references: [id])
+
+  products       Product[]
+  quantityPrices SubcategoryQuantityPrice[]
 
   @@map("subcategories")
 }
