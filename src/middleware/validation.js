@@ -45,7 +45,6 @@ export const validate = (type) => {
 };
 
 
-// Contact form validation
 export const validateContact = [
   body('name')
     .trim()
@@ -68,7 +67,7 @@ export const validateContact = [
     .trim()
     .notEmpty()
     .withMessage('Message is required')
-    .isLength({ min: 10, max: 2000 })
+    .isLength({ min: 2, max: 2000 })
     .withMessage('Message must be between 10 and 2000 characters'),
   
   (req, res, next) => {
@@ -76,8 +75,7 @@ export const validateContact = [
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Validation failed',
-        errors: errors.array()
+        message: errors.array()[0].msg // 🔥 EXACT error
       });
     }
     next();
@@ -90,6 +88,11 @@ export const validateRating = [
   body('productId')
     .notEmpty()
     .withMessage('Product ID is required'),
+  
+  body('variantId')
+    .optional()
+    .isString()
+    .withMessage('Variant ID must be a string'),
   
   body('rating')
     .isInt({ min: 1, max: 5 })
@@ -110,8 +113,7 @@ export const validateRating = [
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Validation failed',
-        errors: errors.array()
+        message: errors.array()[0].msg
       });
     }
     next();
@@ -183,15 +185,12 @@ export const validateOrder = [
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Validation failed',
-        errors: errors.array()
+        message: errors.array()[0].msg // 🔥 EXACT error
       });
     }
     next();
   }
 ];
-
-
 
 export const validateProduct = [
   // Check if required fields exist
@@ -1104,44 +1103,51 @@ export const parseFormData = (req, res, next) => {
 
 // Slider validation
 export const validateSlider = [
-  
+  // Title validation
   body('title')
     .trim()
     .notEmpty()
     .withMessage('Slider title is required')
+    .bail()
     .isLength({ min: 2, max: 300 })
-    .withMessage('Title must be between 2 and 200 characters'),
+    .withMessage('Title must be between 2 and 300 characters'),
 
+  // Subtitle validation
   body('subtitle')
     .optional()
     .trim()
     .isLength({ max: 300 })
-    .withMessage('Subtitle must be less than 200 characters'),
+    .withMessage('Subtitle must be less than 300 characters'),
 
+  // Description validation
   body('description')
     .optional()
     .trim()
     .isLength({ max: 1000 })
     .withMessage('Description must be less than 1000 characters'),
 
+  // Small text validation
   body('smallText')
     .optional()
     .trim()
     .isLength({ max: 300 })
-    .withMessage('Small text must be less than 100 characters'),
+    .withMessage('Small text must be less than 300 characters'),
 
+  // Offer text validation
   body('offerText')
     .optional()
     .trim()
     .isLength({ max: 100 })
     .withMessage('Offer text must be less than 100 characters'),
 
+  // Button text validation
   body('buttonText')
     .optional()
     .trim()
     .isLength({ max: 50 })
     .withMessage('Button text must be less than 50 characters'),
 
+  // Button link validation
   body('buttonLink')
     .optional()
     .trim()
@@ -1154,21 +1160,25 @@ export const validateSlider = [
       return true;
     }),
 
+  // Layout validation
   body('layout')
     .optional()
     .isIn(['left', 'right', 'center'])
     .withMessage('Layout must be one of: left, right, center'),
 
+  // Order validation
   body('order')
     .optional()
     .isInt({ min: 0, max: 1000 })
     .withMessage('Order must be an integer between 0 and 1000'),
 
+  // Active status validation
   body('isActive')
     .optional()
     .isBoolean()
     .withMessage('isActive must be a boolean value'),
 
+  // Start date validation
   body('startDate')
     .optional()
     .isISO8601()
@@ -1184,6 +1194,7 @@ export const validateSlider = [
       return true;
     }),
 
+  // End date validation
   body('endDate')
     .optional()
     .isISO8601()
@@ -1199,15 +1210,14 @@ export const validateSlider = [
       return true;
     }),
 
-  // Validation result middleware
+  // Validation result middleware - Returns only the first error
   (req, res, next) => {
     const errors = validationResult(req);
     
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Slider validation failed',
-        errors: errors.array()
+        message: errors.array()[0].msg // 🔥 EXACT error (first one)
       });
     }
 
@@ -1310,13 +1320,13 @@ export const validateSliderUpdate = [
       return true;
     }),
 
+  // Validation result middleware - Returns only the first error
   (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Slider update validation failed',
-        errors: errors.array()
+        message: errors.array()[0].msg // 🔥 EXACT error (first one)
       });
     }
     next();

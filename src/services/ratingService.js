@@ -3,63 +3,137 @@ import logger from '../utils/logger.js';
 
 class RatingService {
   // Get all ratings with pagination and filtering
-  async getAllRatings({ page, limit, isApproved, productId, userId }) {
-    const skip = (page - 1) * limit;
-    
-    const where = {};
-    
-    if (isApproved !== undefined) {
-      where.isApproved = isApproved === 'true';
-    }
-    
-    if (productId) {
-      where.productId = productId;
-    }
-    
-    if (userId) {
-      where.userId = userId;
-    }
-    
-    const [ratings, total] = await Promise.all([
-      prisma.rating.findMany({
-        where,
-        skip,
-        take: limit,
-        include: {
-          product: {
-            select: {
-              id: true,
-              name: true,
-              productCode: true,
-              normalPrice: true,
-              offerPrice: true
-            }
-          },
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true
+async getAllRatings({ page, limit, isApproved, productId, userId, variantId }) {
+  const skip = (page - 1) * limit;
+  
+  const where = {};
+  
+  if (isApproved !== undefined) {
+    where.isApproved = isApproved === 'true';
+  }
+  
+  if (productId) {
+    where.productId = productId;
+  }
+  
+  if (userId) {
+    where.userId = userId;
+  }
+
+  if (variantId) {
+    where.variantId = variantId;
+  }
+  
+  const [ratings, total] = await Promise.all([
+    prisma.rating.findMany({
+      where,
+      skip,
+      take: limit,
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            productCode: true,
+            normalPrice: true,
+            offerPrice: true,
+            // Include product images as well
+            images: {
+              select: {
+                id: true,
+                imageUrl: true,
+                imagePublicId: true,
+                isPrimary: true
+              },
+              orderBy: {
+                isPrimary: 'desc'
+              }
             }
           }
         },
-        orderBy: {
-          createdAt: 'desc'
+        variant: {
+          include: {
+            variantImages: {
+              select: {
+                id: true,
+                imageUrl: true,
+                imagePublicId: true,
+                isPrimary: true,
+                color: true
+              },
+              orderBy: {
+                isPrimary: 'desc'
+              }
+            }
+          }
+        },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        helpfuls: {
+          select: {
+            id: true,
+            userId: true,
+            createdAt: true,
+            user: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
         }
-      }),
-      prisma.rating.count({ where })
-    ]);
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    }),
+    prisma.rating.count({ where })
+  ]);
+  
+  // Transform the data to include images from variant OR product
+  const transformedRatings = ratings.map(rating => {
+    // Try to get variant images first
+    const variantImages = rating.variant?.variantImages || [];
+    
+    // If no variant images, use product images
+    const productImages = rating.product.images || [];
+    
+    // Determine which images to use
+    const displayImages = variantImages.length > 0 ? variantImages : productImages;
+    const primaryImage = displayImages.find(img => img.isPrimary) || displayImages[0];
     
     return {
-      ratings,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit)
-      }
+      ...rating,
+      variantInfo: rating.variant ? {
+        id: rating.variant.id,
+        color: rating.variant.color,
+        size: rating.variant.size,
+        images: variantImages,
+        primaryImage: primaryImage
+      } : null,
+      // Always include display images for the frontend
+      displayImages,
+      primaryDisplayImage: primaryImage,
+      // Indicate whether this is a variant-specific rating or product rating
+      isVariantSpecific: !!rating.variantId
     };
-  }
+  });
+  
+  return {
+    ratings: transformedRatings,
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit)
+    }
+  };
+}
 
   // Get rating by ID
   async getRatingById(ratingId) {
@@ -93,83 +167,79 @@ class RatingService {
   }
 
   // Create rating
-  async createRating(ratingData, userId) {
-    const { productId, rating, title, review } = ratingData;
-    
-    // Validate required fields
-    if (!productId || !rating) {
-      throw new Error('Product ID and rating are required');
-    }
-    
-    // Validate rating range
-    if (rating < 1 || rating > 5) {
-      throw new Error('Rating must be between 1 and 5');
-    }
-    
-    // Check if product exists
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-      select: { id: true, name: true }
-    });
-    
-    if (!product) {
-      throw new Error('Product not found');
-    }
-    
-    // Check if user has already rated this product
-    const existingRating = await prisma.rating.findFirst({
-      where: {
-        productId,
-        userId
-      }
-    });
-    
-    if (existingRating) {
-      throw new Error('You have already rated this product');
-    }
-    
-    // Get user details for the rating
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { name: true, email: true }
-    });
-    
-    if (!user) {
-      throw new Error('User not found');
-    }
-    
-    const newRating = await prisma.rating.create({
-      data: {
-        productId,
-        userId,
-        userName: user.name,
-        userEmail: user.email,
-        rating: parseInt(rating),
-        title: title || null,
-        review: review || null,
-        isApproved: true // Default to false for admin approval
-      },
-      include: {
-        product: {
-          select: {
-            id: true,
-            name: true,
-            productCode: true
-          }
-        },
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true
+async createRating({ productId, variantId, userId, userName, userEmail, rating, title, review }) {
+  const newRating = await prisma.rating.create({
+    data: {
+      productId,
+      variantId, // Include variantId if provided
+      userId,
+      userName,
+      userEmail,
+      rating,
+      title,
+      review,
+      isApproved: true // or based on your business logic
+    },
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          productCode: true,
+          normalPrice: true,
+          offerPrice: true,
+          images: {
+            select: {
+              id: true,
+              imageUrl: true,
+              imagePublicId: true,
+              isPrimary: true
+            },
+            orderBy: {
+              isPrimary: 'desc'
+            }
           }
         }
+      },
+      variant: {
+        include: {
+          variantImages: {
+            select: {
+              id: true,
+              imageUrl: true,
+              imagePublicId: true,
+              isPrimary: true,
+              color: true
+            },
+            orderBy: {
+              isPrimary: 'desc'
+            }
+          }
+        }
+      },
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
       }
-    });
-    
-    logger.info(`Rating created: ${newRating.id} for product: ${productId}`);
-    return newRating;
-  }
+    }
+  });
+
+  // Transform the response
+  const variantImages = newRating.variant?.variantImages || [];
+  const productImages = newRating.product.images || [];
+  const displayImages = variantImages.length > 0 ? variantImages : productImages;
+  const primaryImage = displayImages.find(img => img.isPrimary) || displayImages[0];
+
+  return {
+    ...newRating,
+    displayImages,
+    primaryDisplayImage: primaryImage,
+    isVariantSpecific: !!variantId
+  };
+}
 
   // Update rating (User can update their own rating)
   async updateRating(ratingId, updateData, userId) {
@@ -516,6 +586,95 @@ class RatingService {
     logger.info(`Bulk rating approval update: ${ratingIds.length} ratings -> ${approvalStatus ? 'approved' : 'unapproved'}`);
     return result;
   }
+
+    // Remove helpful vote
+  async removeHelpful(ratingId, userId) {
+    const rating = await prisma.rating.findUnique({
+      where: { id: ratingId }
+    });
+    
+    if (!rating) {
+      throw new Error('Rating not found');
+    }
+    
+    // Check if user has marked this rating as helpful
+    const existingHelpful = await prisma.helpfulRating.findFirst({
+      where: {
+        ratingId,
+        userId
+      }
+    });
+    
+    if (!existingHelpful) {
+      throw new Error('You have not marked this rating as helpful');
+    }
+    
+    // Delete helpful entry
+    await prisma.helpfulRating.delete({
+      where: {
+        id: existingHelpful.id
+      }
+    });
+    
+    // Update helpful count on the rating (decrement)
+    const updatedRating = await prisma.rating.update({
+      where: { id: ratingId },
+      data: {
+        helpfulCount: {
+          decrement: 1
+        },
+        updatedAt: new Date()
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        helpfuls: {
+          where: {
+            userId: userId
+          },
+          select: {
+            id: true,
+            userId: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+    
+    logger.info(`Helpful vote removed: ${ratingId} by user: ${userId}`);
+    return updatedRating;
+  }
+
+  // Optional: Get helpful status for a user and rating
+  async getHelpfulStatus(ratingId, userId) {
+    const helpful = await prisma.helpfulRating.findFirst({
+      where: {
+        ratingId,
+        userId
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
+    
+    return {
+      hasMarkedHelpful: !!helpful,
+      helpfulData: helpful
+    };
+  }
+
 }
 
 export default new RatingService();

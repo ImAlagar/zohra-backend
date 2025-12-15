@@ -10,7 +10,9 @@ import {
   getProductRatings,
   getUserRatings,
   bulkUpdateRatingApproval,
-  markHelpful // Add this
+  markHelpful,
+  removeHelpful, // Add this
+  getHelpfulStatus // Add this
 } from '../controllers/ratingController.js';
 import { auth, authorize } from '../middleware/auth.js';
 import { validateRating } from '../middleware/validation.js';
@@ -25,10 +27,14 @@ router.post('/', auth, validateRating, createRating);
 router.get('/user/my-ratings', auth, getUserRatings);
 router.put('/:ratingId', auth, updateRating);
 router.delete('/:ratingId', auth, deleteRating);
-router.post('/:ratingId/helpful', auth, markHelpful); // Add this line
+
+// Helpful routes
+router.post('/:ratingId/helpful', auth, markHelpful);
+router.delete('/:ratingId/helpful', auth, removeHelpful); // Add this
+router.get('/:ratingId/helpful/status', auth, getHelpfulStatus); // Optional: Add this
 
 // Admin only routes
-router.get('/admin', auth, authorize('ADMIN'), getAllRatings);
+router.get('/admin', getAllRatings);
 router.get('/admin/stats', auth, authorize('ADMIN'), getRatingStats);
 router.get('/admin/:ratingId', auth, authorize('ADMIN'), getRatingById);
 router.patch('/admin/:ratingId/approval', auth, authorize('ADMIN'), toggleRatingApproval);

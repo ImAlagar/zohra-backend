@@ -3,14 +3,24 @@ import { asyncHandler } from '../utils/helpers.js';
 
 // Get all ratings (Admin only)
 export const getAllRatings = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 10, isApproved, productId, userId } = req.query;
+  const { 
+    page = 1, 
+    limit = 10, 
+    isApproved, 
+    productId, 
+    userId, 
+    variantId,
+    includeVariantImages = 'true'  // New parameter
+  } = req.query;
   
   const result = await ratingService.getAllRatings({
     page: parseInt(page),
     limit: parseInt(limit),
     isApproved,
     productId,
-    userId
+    userId,
+    variantId,
+    includeVariantImages: includeVariantImages === 'true'  // Parse boolean
   });
   
   res.status(200).json({
@@ -18,6 +28,7 @@ export const getAllRatings = asyncHandler(async (req, res) => {
     data: result
   });
 });
+
 
 // Get rating by ID
 export const getRatingById = asyncHandler(async (req, res) => {
@@ -32,26 +43,38 @@ export const getRatingById = asyncHandler(async (req, res) => {
 });
 
 // Create rating (Authenticated users)
+// In your ratingController.js
 export const createRating = asyncHandler(async (req, res) => {
-  const ratingData = req.body;
-  const userId = req.user.id;
+  const userId = req.user.id; // Assuming you have user in request
   
-  const rating = await ratingService.createRating(ratingData, userId);
+  const { productId, variantId, rating, title, review } = req.body;
+  
+  const newRating = await ratingService.createRating({
+    productId,
+    variantId, // Pass variantId
+    rating,
+    title,
+    review
+  }, userId);
   
   res.status(201).json({
     success: true,
-    message: 'Rating submitted successfully. It will be visible after approval.',
-    data: rating
+    message: 'Rating submitted successfully',
+    data: newRating
   });
 });
 
-// Update rating (User can update their own rating)
 export const updateRating = asyncHandler(async (req, res) => {
-  const { ratingId } = req.params;
-  const updateData = req.body;
   const userId = req.user.id;
+  const { id } = req.params;
+  const { rating, title, review, variantId } = req.body;
   
-  const updatedRating = await ratingService.updateRating(ratingId, updateData, userId);
+  const updatedRating = await ratingService.updateRating(id, {
+    rating,
+    title,
+    review,
+    variantId // Pass variantId for update
+  }, userId);
   
   res.status(200).json({
     success: true,
@@ -59,6 +82,7 @@ export const updateRating = asyncHandler(async (req, res) => {
     data: updatedRating
   });
 });
+
 
 // Delete rating (User can delete their own rating, Admin can delete any)
 export const deleteRating = asyncHandler(async (req, res) => {
@@ -160,6 +184,20 @@ export const bulkUpdateRatingApproval = asyncHandler(async (req, res) => {
 });
 
 
+// Get helpful status for current user
+export const getHelpfulStatus = asyncHandler(async (req, res) => {
+  const { ratingId } = req.params;
+  const userId = req.user.id;
+  
+  const result = await ratingService.getHelpfulStatus(ratingId, userId);
+  
+  res.status(200).json({
+    success: true,
+    data: result
+  });
+});
+
+
 export const markHelpful = asyncHandler(async (req, res) => {
   const { ratingId } = req.params;
   const userId = req.user.id;
@@ -172,3 +210,19 @@ export const markHelpful = asyncHandler(async (req, res) => {
     data: result
   });
 });
+
+
+// Remove helpful vote
+export const removeHelpful = asyncHandler(async (req, res) => {
+  const { ratingId } = req.params;
+  const userId = req.user.id;
+  
+  const result = await ratingService.removeHelpful(ratingId, userId);
+  
+  res.status(200).json({
+    success: true,
+    message: 'Helpful vote removed successfully',
+    data: result
+  });
+});
+

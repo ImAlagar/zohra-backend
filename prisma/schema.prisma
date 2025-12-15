@@ -217,7 +217,9 @@ model ProductVariant {
   updatedAt   DateTime @updatedAt
   product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   
+  ratings     Rating[] 
   variantImages ProductVariantImage[]
+  
   orderItems   OrderItem[]
 
   @@map("product_variants")
@@ -257,6 +259,7 @@ model HelpfulRating {
 model Rating {
   id           String          @id @default(cuid())
   productId    String
+  variantId    String?          // Add this line
   userId       String
   userName     String
   userEmail    String
@@ -268,11 +271,13 @@ model Rating {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   product      Product         @relation(fields: [productId], references: [id])
+  variant      ProductVariant? @relation(fields: [variantId], references: [id])
   user         User            @relation(fields: [userId], references: [id])
   helpfuls     HelpfulRating[]
 
   @@map("ratings")
   @@index([productId])
+  @@index([variantId]) // Add this index
   @@index([userId])
   @@index([isApproved])
   @@index([createdAt])
@@ -472,8 +477,6 @@ model ProductCustomization {
   
   @@map("product_customizations")
 }
-
-
 
 // Enums
 enum UserRole {
