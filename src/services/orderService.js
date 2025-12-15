@@ -1365,6 +1365,352 @@ class OrderService {
     };
   }
 
+  // Add these methods to the OrderService class
+
+async deleteOrder(orderId) {
+  // First, check if order exists
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      orderItems: true,
+      customImages: true,
+      trackingHistory: true
+    }
+  });
+  
+  if (!order) {
+    throw new Error('Order not found');
+  }
+  
+  // Prevent deletion of orders that are not in terminal states
+  const nonDeletableStatuses = ['PROCESSING', 'SHIPPED', 'DELIVERED'];
+  if (nonDeletableStatuses.includes(order.status)) {
+    throw new Error(`Cannot delete order with status: ${order.status}. Please cancel or refund first.`);
+  }
+  
+  // Store order info for logging before deletion
+  const orderInfo = {
+    orderNumber: order.orderNumber,
+    totalAmount: order.totalAmount,
+    status: order.status
+  };
+  
+  try {
+    // Delete related records first (in correct order due to foreign key constraints)
+    
+    // Delete tracking history
+    if (order.trackingHistory && order.trackingHistory.length > 0) {
+      await prisma.trackingHistory.deleteMany({
+        where: { orderId }
+      });
+    }
+    
+    // Delete custom images
+    if (order.customImages && order.customImages.length > 0) {
+      await prisma.customOrderImage.deleteMany({
+        where: { orderId }
+      });
+    }
+    
+    // Delete order items
+    if (order.orderItems && order.orderItems.length > 0) {
+      await prisma.orderItem.deleteMany({
+        where: { orderId }
+      });
+    }
+    
+    // Delete the order itself
+    await prisma.order.delete({
+      where: { id: orderId }
+    });
+    
+    logger.info(`Order permanently deleted: ${JSON.stringify(orderInfo)}`);
+    
+    return {
+      deletedOrder: orderInfo,
+      deletedAt: new Date(),
+      message: 'Order permanently deleted'
+    };
+  } catch (error) {
+    logger.error(`Failed to delete order ${orderId}:`, error);
+    throw new Error(`Failed to delete order: ${error.message}`);
+  }
+}
+
+async softDeleteOrder(orderId) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId }
+  });
+  
+  if (!order) {
+    throw new Error('Order not found');
+  }
+  
+  // Check if already deleted
+  if (order.deletedAt) {
+    throw new Error('Order is already soft deleted');
+  }
+  
+  // Update order with deleted flag and timestamp
+  const updatedOrder = await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      deletedAt: new Date(),
+      status: 'CANCELLED', // Optionally update status to cancelled
+      // Add a note about soft deletion
+      notes: JSON.stringify({
+        ...JSON.parse(order.notes || '{}'),
+        softDeleted: true,
+        deletedAt: new Date().toISOString(),
+        deletedBy: 'ADMIN' // In production, you'd pass the admin user ID
+      })
+    },
+    include: {
+      orderItems: {
+        include: {
+          product: {
+            include: {
+              images: {
+                take: 1,
+                select: {
+                  imageUrl: true
+                }
+              }
+            }
+          },
+          productVariant: {
+            select: {
+              id: true,
+              color: true,
+              size: true
+            }
+          }
+        }
+      },
+      customImages: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      }
+    }
+  });
+  
+  // Create tracking history entry
+  await prisma.trackingHistory.create({
+    data: {
+      orderId,
+      status: 'CANCELLED',
+      description: 'Order soft deleted by admin',
+      location: 'System'
+    }
+  });
+  
+  logger.info(`Order soft deleted: ${order.orderNumber} (ID: ${orderId})`);
+  
+  return updatedOrder;
+}
+
+async bulkDeleteOrders(orderIds, deleteType = 'soft') {
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    throw new Error('No order IDs provided');
+  }
+  
+  // Validate all orders exist and can be deleted
+  const orders = await prisma.order.findMany({
+    where: {
+      id: { in: orderIds }
+    },
+    select: {
+      id: true,
+      orderNumber: true,
+      status: true
+    }
+  });
+  
+  if (orders.length !== orderIds.length) {
+    // Find which IDs are invalid
+    const foundIds = orders.map(order => order.id);
+    const invalidIds = orderIds.filter(id => !foundIds.includes(id));
+    throw new Error(`Some orders not found: ${invalidIds.join(', ')}`);
+  }
+  
+  // Check for non-deletable orders
+  const nonDeletableStatuses = ['PROCESSING', 'SHIPPED', 'DELIVERED'];
+  const nonDeletableOrders = orders.filter(order => 
+    deleteType === 'hard' && nonDeletableStatuses.includes(order.status)
+  );
+  
+  if (nonDeletableOrders.length > 0) {
+    throw new Error(
+      `Cannot permanently delete orders in status: ${nonDeletableStatuses.join(', ')}. ` +
+      `Affected orders: ${nonDeletableOrders.map(o => o.orderNumber).join(', ')}`
+    );
+  }
+  
+  let results = [];
+  
+  if (deleteType === 'soft') {
+    // Soft delete all orders
+    await prisma.order.updateMany({
+      where: {
+        id: { in: orderIds }
+      },
+      data: {
+        deletedAt: new Date(),
+        notes: JSON.stringify({
+          softDeleted: true,
+          deletedAt: new Date().toISOString(),
+          deletedBy: 'ADMIN'
+        })
+      }
+    });
+    
+    // Create tracking history for each order
+    const trackingPromises = orderIds.map(orderId => 
+      prisma.trackingHistory.create({
+        data: {
+          orderId,
+          status: 'CANCELLED',
+          description: 'Order soft deleted by admin (bulk operation)',
+          location: 'System'
+        }
+      })
+    );
+    
+    await Promise.all(trackingPromises);
+    
+    results = orders.map(order => ({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: 'SOFT_DELETED'
+    }));
+    
+    logger.info(`Bulk soft deleted ${orders.length} orders`);
+  } else {
+    // Hard delete all orders and their dependencies
+    for (const orderId of orderIds) {
+      try {
+        // Delete related records
+        await prisma.trackingHistory.deleteMany({
+          where: { orderId }
+        });
+        
+        await prisma.customOrderImage.deleteMany({
+          where: { orderId }
+        });
+        
+        await prisma.orderItem.deleteMany({
+          where: { orderId }
+        });
+        
+        // Delete the order
+        await prisma.order.delete({
+          where: { id: orderId }
+        });
+        
+        results.push({
+          orderId,
+          status: 'PERMANENTLY_DELETED',
+          success: true
+        });
+      } catch (error) {
+        results.push({
+          orderId,
+          status: 'FAILED',
+          error: error.message,
+          success: false
+        });
+      }
+    }
+    
+    logger.info(`Bulk hard deleted ${orderIds.length} orders`);
+  }
+  
+  return {
+    deletedCount: results.filter(r => r.success !== false).length,
+    failedCount: results.filter(r => r.success === false).length,
+    results
+  };
+}
+
+async restoreOrder(orderId) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId }
+  });
+  
+  if (!order) {
+    throw new Error('Order not found');
+  }
+  
+  if (!order.deletedAt) {
+    throw new Error('Order is not soft deleted');
+  }
+  
+  // Parse existing notes
+  const notes = JSON.parse(order.notes || '{}');
+  
+  // Remove soft delete info from notes
+  delete notes.softDeleted;
+  delete notes.deletedAt;
+  delete notes.deletedBy;
+  
+  const restoredOrder = await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      deletedAt: null,
+      notes: JSON.stringify(notes)
+    },
+    include: {
+      orderItems: {
+        include: {
+          product: {
+            include: {
+              images: {
+                take: 1,
+                select: {
+                  imageUrl: true
+                }
+              }
+            }
+          },
+          productVariant: {
+            select: {
+              id: true,
+              color: true,
+              size: true
+            }
+          }
+        }
+      },
+      customImages: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      }
+    }
+  });
+  
+  // Create tracking history entry
+  await prisma.trackingHistory.create({
+    data: {
+      orderId,
+      status: restoredOrder.status,
+      description: 'Order restored by admin',
+      location: 'System'
+    }
+  });
+  
+  logger.info(`Order restored: ${restoredOrder.orderNumber} (ID: ${orderId})`);
+  
+  return restoredOrder;
+}
+
 }
 
 export default new OrderService();

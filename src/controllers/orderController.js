@@ -322,3 +322,62 @@ export const testPhonePeIntegration = asyncHandler(async (req, res) => {
   }
 });
 
+
+
+export const deleteOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  
+  const result = await orderService.deleteOrder(orderId);
+  
+  res.status(200).json({
+    success: true,
+    message: 'Order deleted permanently',
+    data: result
+  });
+});
+
+// Soft delete order (mark as deleted)
+export const softDeleteOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  
+  const order = await orderService.softDeleteOrder(orderId);
+  
+  res.status(200).json({
+    success: true,
+    message: 'Order soft deleted successfully',
+    data: order
+  });
+});
+
+// Bulk delete orders
+export const bulkDeleteOrders = asyncHandler(async (req, res) => {
+  const { orderIds, deleteType = 'soft' } = req.body;
+  
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please provide an array of order IDs'
+    });
+  }
+  
+  const result = await orderService.bulkDeleteOrders(orderIds, deleteType);
+  
+  res.status(200).json({
+    success: true,
+    message: `Successfully ${deleteType === 'soft' ? 'soft' : 'permanently'} deleted ${result.deletedCount} orders`,
+    data: result
+  });
+});
+
+// Restore soft-deleted order
+export const restoreOrder = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  
+  const order = await orderService.restoreOrder(orderId);
+  
+  res.status(200).json({
+    success: true,
+    message: 'Order restored successfully',
+    data: order
+  });
+});

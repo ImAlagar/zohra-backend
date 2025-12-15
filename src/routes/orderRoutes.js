@@ -14,7 +14,11 @@ import {
   calculateOrderTotals,
   createCODOrder,
   testPhonePeIntegration,
-  verifyPaymentAndCreateOrder
+  verifyPaymentAndCreateOrder,
+  deleteOrder,
+  softDeleteOrder,
+  bulkDeleteOrders,
+  restoreOrder
 } from '../controllers/orderController.js';
 import { auth, authorize } from '../middleware/auth.js';
 
@@ -41,7 +45,12 @@ router.get('/admin/:orderId', auth, authorize('ADMIN'), getOrderById);
 router.patch('/admin/:orderId/status', auth, authorize('ADMIN'), updateOrderStatus);
 router.patch('/admin/:orderId/tracking', auth, authorize('ADMIN'), updateTrackingInfo);
 router.post('/admin/:orderId/refund', auth, authorize('ADMIN'), processRefund);
-
+// Add this route to orderRoutes.js after the other admin routes
+router.delete('/admin/:orderId', auth, authorize('ADMIN'), deleteOrder);
+router.delete('/admin/soft/:orderId', auth, authorize('ADMIN'), softDeleteOrder);
+router.delete('/admin/bulk-delete', auth, authorize('ADMIN'), bulkDeleteOrders);
+// Add this route as well
+router.patch('/admin/restore/:orderId', auth, authorize('ADMIN'), restoreOrder);
 // Add to routes
 router.get('/test-phonepe-integration', testPhonePeIntegration);
 

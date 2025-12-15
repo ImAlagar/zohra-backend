@@ -335,6 +335,7 @@ model Order {
   estimatedDelivery DateTime?
   shippedAt       DateTime?
   deliveredAt     DateTime?
+  deletedAt       DateTime?       @map("deleted_at")
   
   trackingHistory TrackingHistory[]
 
