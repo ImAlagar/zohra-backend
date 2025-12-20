@@ -2808,7 +2808,6 @@ Administrator Portal - Security First
                     <h3 style="color: #1565c0; margin-bottom: 15px;">🚚 Tracking Information</h3>
                     <p><strong>Tracking Number:</strong> ${orderData.trackingNumber}</p>
                     <p><strong>Carrier:</strong> ${orderData.carrier}</p>
-                    ${orderData.trackingUrl ? `<p><strong>Track Your Order:</strong> <a href="${orderData.trackingUrl}" style="color: #1565c0;">Click here to track</a></p>` : ''}
                     ${orderData.estimatedDelivery ? `<p><strong>Estimated Delivery:</strong> ${new Date(orderData.estimatedDelivery).toLocaleDateString()}</p>` : ''}
                 </div>
                 ` : ''}
